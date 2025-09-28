@@ -1,0 +1,52 @@
+import docx2pdf
+import os
+import datetime
+import fitz  # PyMuPDF
+from PIL import Image
+#import comtypes.client
+
+def convert_docx_to_pdf(input_path, output_path):
+    output_path=os.path.join(output_path,f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_converted.pdf")
+    docx2pdf.convert(input_path, output_path)
+    return output_path
+
+def convert_pptx_to_pdf(input_path, output_path):
+    output_path=os.path.join(output_path,f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_converted.pdf")
+    powerpoint = comtypes.client.CreateObject("Powerpoint.Application")
+    powerpoint.Visible = 1
+    slides = powerpoint.Presentations.Open(input_path)
+    slides.SaveAs(output_path, 32)  # formatType = 32 for ppt to pdf
+    slides.Close()
+    powerpoint.Quit()
+    return output_path
+
+def convert_xlsx_to_pdf(input_path, output_path):
+    output_path=os.path.join(output_path,f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_converted.pdf")
+    excel = comtypes.client.CreateObject("Excel.Application")
+    excel.Visible = 1
+    sheets = excel.Workbooks.Open(input_path)
+    sheets.ExportAsFixedFormat(0, output_path)  # formatType = 0 for xlsx to pdf
+    sheets.Close()
+    excel.Quit()
+    return output_path
+
+def office_to_pdf(input_path, output_path):
+    
+    ext = os.path.splitext(input_path)[1].lower()
+
+    if ext == '.docx' :
+        return convert_docx_to_pdf(input_path, output_path)
+    
+    elif ext == '.pptx':
+        pass
+        return convert_pptx_to_pdf(input_path, output_path)
+    
+    elif ext == '.xlsx':
+        pass
+        return convert_xlsx_to_pdf(input_path, output_path)
+    
+    else:
+        raise ValueError("Unsupported file format")
+
+##Testing Purposes   
+##office_to_pdf("/home/gtanmay/Documents/DOCS/untitled1.odt","Temp/temp_pdfs/cache")
