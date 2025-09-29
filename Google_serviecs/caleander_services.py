@@ -175,7 +175,7 @@ def delete_event(token_file: str, delete_details: List[str]):
     except Exception as e:
         print(f"\n[DELETE GENERIC ERROR] An unexpected error occurred: {e}")
 
-
+'''
 # --- Demonstration ---
 if __name__ == '__main__':
     # NOTE: These examples require a valid 'token.json' 
@@ -223,3 +223,5 @@ if __name__ == '__main__':
         print("Please replace 'YOUR_EVENT_ID_HERE' with a real event ID from the VIEW EVENTS output to test deletion.")
         
     print("\n" + "="*50)
+    '''
+#--- END OF DEMONSTRATION ---

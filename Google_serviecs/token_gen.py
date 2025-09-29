@@ -3,7 +3,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 
-def generate_google_token_simple(credentials_file='Google_serviecs/credentials.json', token_file='Google_serviecs/token.json'):
+def generate_google_token_simple(credentials_file='Google_serviecs/credentials.json', token_file='token.json'):
  
     
     # Scopes for full access to Tasks, Calendar, and Gmail
@@ -50,8 +50,11 @@ def generate_google_token_simple(credentials_file='Google_serviecs/credentials.j
         print(f"Valid token found at '{token_file}'. No action needed.")
 
 
-# --- Example of how to call the function ---
+# Test run 
+'''# --- Demonstration --- --- IGNORE ---
 if __name__ == '__main__':
     # Make sure to run this script from the directory 
     # where your 'credentials.json' file is located.
     generate_google_token_simple()
+# --- END OF DEMONSTRATION --- --- IGNORE ---
+'''

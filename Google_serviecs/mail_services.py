@@ -4,6 +4,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from typing import List, Optional
+from google.auth.transport.requests import Request
 
 # The scope MUST match the scope used to generate your token.json
 GMAIL_SCOPES = ['https://mail.google.com/'] 
@@ -203,7 +204,8 @@ def flag_or_label_mail(token_file: str, update_details: List[str]):
         print(f"\n[UPDATE GENERIC ERROR] An unexpected error occurred: {e}")
 
 
-# --- Demonstration ---
+# AI test run 
+'''-# --- Demonstration --- --- IGNORE ---
 if __name__ == '__main__':
     # NOTE: These examples will only work if you have a valid 'token.json' 
     # file in the same directory as this script.
@@ -261,3 +263,5 @@ if __name__ == '__main__':
         print("Please replace 'YOUR_MESSAGE_ID_HERE' in the code to test FLAG/LABEL function.")
         
     print("\n" + "="*50)
+    '''
+# --- END OF DEMONSTRATION --- --- IGNORE ---

@@ -85,5 +85,4 @@ def write_links_to_file():
     print(f"\n✔️ All done! The links have been saved to '{output_filename}'.")
 
 
-if __name__ == "__main__":
-    write_links_to_file()
+
