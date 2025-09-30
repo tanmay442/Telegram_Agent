@@ -6,7 +6,7 @@ import datetime
 
 def convert_image_to_pdf(image_path, pdf_path):
     #image_path = "input_image.jpg"
-    pdf_path = os.path.join(pdf_path,f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_pdf")
+    pdf_path = os.path.join(pdf_path,f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
 
     try:
         # Open the image using Pillow
