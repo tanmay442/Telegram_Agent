@@ -9,43 +9,45 @@ def generate_response(
     file_path: str = None,
     conversation_history: list = None
 ):
-    
+    """
+    Generates a response from the Gemini model, handling text, files, and history.
+    """
     try:
-        
         genai.configure(api_key=api_key)
 
-        
         model = genai.GenerativeModel(
             model_name,
             system_instruction=system_instruction
         )
-
         
-        content_to_send = []
+        # Start with the existing conversation history if it exists
+        chat_history = conversation_history or []
 
-        # conversation history 
-        if conversation_history:
-            content_to_send.extend(conversation_history)
-
-        # file upload .
+        # Prepare the user's new message (prompt)
+        user_prompt_parts = []
+        
+        # If there's a file, upload it and add it to the parts
         uploaded_file = None
         if file_path:
             uploaded_file = genai.upload_file(path=file_path)
-            content_to_send.append(uploaded_file)
+            user_prompt_parts.append(uploaded_file)
+        
+        # Add the text part of the prompt
+        user_prompt_parts.append(prompt)
 
+        # Combine the history with the new user message
+        content_to_send = chat_history + [{'role': 'user', 'parts': user_prompt_parts}]
 
-        # user prompt.
-        content_to_send.append(prompt)
-
-        # Generate the content.
+        # Generate the content
         response = model.generate_content(content_to_send)
+
+        # Clean up the uploaded file if it exists
+        if uploaded_file:
+            genai.delete_file(uploaded_file.name)
 
         return response.text
 
     except Exception as e:
+        # It's good practice to log the full error for debugging
+        print(f"Error in generate_response: {e}")
         return f"An error occurred: {e}"
-
-
-
-
-

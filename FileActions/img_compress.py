@@ -3,64 +3,48 @@ import os
 import io
 import datetime
 
-def compress_image(input_path, output_path, max_size=500 ,quality=95):
-    
-    output_path=os.path.join(output_path,f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_compressed.jpg")
+def compress_image(input_path, output_dir, max_size=500, quality=95):
+    """
+    Compresses an image to be under a certain size.
+    Returns the path to the compressed file, or the original path if no compression was needed.
+    Returns None on failure.
+    """
+    # Define a unique output path within the output directory
+    file_name = f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_compressed.jpg"
+    output_path = os.path.join(output_dir, file_name)
 
     max_size_bytes = max_size * 1024
 
-    original_size_bytes = os.path.getsize(input_path)
-    if original_size_bytes <= max_size_bytes:
-        print(f"Image is already under {max_size} KB ")
-        return True
     try:
+        original_size_bytes = os.path.getsize(input_path)
+        if original_size_bytes <= max_size_bytes:
+            print(f"Image is already under {max_size} KB. No compression needed.")
+            return input_path  # Return the ORIGINAL path
+
         with Image.open(input_path) as img:
-            # non-JPEG modes for compatibility
             if img.mode in ('RGBA', 'P'):
                 img = img.convert('RGB')
             
-            #in meomry bufer to check file size without saving
             img_buffer = io.BytesIO()
-    
-        while True:
-            quality -= 5
-            if quality < 10:
-                print("Cannot compress image to the desired size without going below quality threshold.")
-                return False
             
-            # save image to the in memory bufer
-            img.save(img_buffer, "JPEG", optimize=True, quality=quality)
-
-            # check bufer size
-            img_buffer_size = img_buffer.tell()
-
-
-            if img_buffer_size <= max_size_bytes:
-                 # good compression level, save the bufer 
+            current_quality = quality
+            while current_quality > 10:
+                img.save(img_buffer, "JPEG", optimize=True, quality=current_quality)
+                
+                if img_buffer.tell() <= max_size_bytes:
                     with open(output_path, "wb") as f:
                         f.write(img_buffer.getvalue())
+                    print(f"Compressed successfully. Saved to '{output_path}'")
+                    return output_path  # Return the NEW path
+                
+                # Reset buffer for next attempt
+                img_buffer.seek(0)
+                img_buffer.truncate(0)
+                current_quality -= 5
 
-                    original_size_mb = original_size_bytes / (1024 * 1024)
-                    compressed_size_kb = img_buffer_size / 1024
-
-
-                    print(f"Original size: {original_size_mb:.2f} MB")
-                    print(f"Compressed size: {compressed_size_kb:.2f} KB (Quality: {quality})")
-                    print(f"File saved to '{output_path}'")
-                    return True
-            
-            # Reset the buffer for the next iteration
-            img_buffer.seek(0)
-            img_buffer.truncate(0)
-            
-
+            print("Could not compress to the target size.")
+            return None
 
     except Exception as e:
-        print(f"An error occurred: {e}")
-        return False
-    
-    return output_path
-
-    
-##TESTING PURPOSES
-###compress_image("/home/gtanmay/Pictures/p.png","Temp/temp_images/cache",)
+        print(f"An error occurred during image compression: {e}")
+        return None
