@@ -1,6 +1,5 @@
 import ast
-from fetching_links import scrape_top_links 
-from fetching_links import write_links_to_file
+from hbtu_updates.fetching_links import scrape_top_links, write_links_to_file
 
 def file_to_list(filename='hbtu_updates/hbtu_links.txt'):
     reconstructed_list = []
