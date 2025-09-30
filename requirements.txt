@@ -9,4 +9,4 @@ Pillow
 requests
 PyMuPDF
 beautifulsoup4
-google.generative.ai
+google-generativeai
