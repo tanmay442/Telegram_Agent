@@ -1,92 +1,113 @@
-from pypdf import PdfReader, PdfWriter
 import os
-import datetime
+import io
+import shutil
+import logging
+from datetime import datetime
 from PIL import Image
 import fitz  # PyMuPDF
-import io
+from pypdf import PdfReader, PdfWriter
 
-def apply_pypdf_compression(input_path, output_path):
+# --- Setup basic logging ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-    output_path=os.path.join(output_path,f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_compressed.pdf")
+def _compress_pdf_streams(input_path: str, output_dir: str) -> str:
     
-    reader = PdfReader(input_path)
-    writer = PdfWriter()
-
-    for page in reader.pages:
-        writer.add_page(page)
-        writer.pages[-1].compress_content_streams()
-
-        
-
-    with open(output_path, "wb") as f:
-        writer.write(f)
+    output_path = os.path.join(output_dir, f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_streams_compressed.pdf")
     
-    return output_path
-    
-  
-def iterative_image_compression(input_pdf_path, output_path, quality=75):
+    try:
+        reader = PdfReader(input_path)
+        writer = PdfWriter()
 
-    output_path=os.path.join(output_path,f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_compressed_iterative.pdf")   
+        for page in reader.pages:
+            writer.add_page(page)
+            # This compresses the content streams of the page
+            writer.pages[-1].compress_content_streams()
 
-    doc=fitz.open(input_pdf_path)# pdf to be processed
+        with open(output_path, "wb") as f:
+            writer.write(f)
+        return output_path
+    except Exception as e:
+        logging.error(f"Error during pypdf stream compression: {e}")
+        return None
 
-    com_pdf=fitz.open()#empty pdf for compressed pages
-
-    for i in range(len(doc)):
-        page=doc.load_page(i) #load page
-
-
-        pix = page.get_pixmap(dpi=250)
-        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-
-
-        #initing the bufer
-        img_buffer = io.BytesIO()
-        img.save (img_buffer, format="JPEG", quality=quality)
-        img_buffer.seek(0)
-
-        #adding new page with compressed image
-        new_page = com_pdf.new_page(width=page.rect.width, height=page.rect.height)
-        new_page.insert_image(page.rect, stream=img_buffer)
-        
-        #freeing the bufer
-        img_buffer.close()
-    
-        #saving the compressed pdf(I have no idea what this line does but it is necassary acc to docs )
-        com_pdf.save(output_path, garbage=4, deflate=True)
-
-    com_pdf.close()
-    doc.close()
-
-    return output_path
+def _compress_pdf_images(input_path: str, output_dir: str, quality: int = 75) -> str:
    
-
-def compress_pdf(input_path, output_path):
-
-    # First try pypdf compression
-    compressed_path = apply_pypdf_compression(input_path, output_path)
+    output_path = os.path.join(output_dir, f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_image_compressed.pdf")
     
-    # Check if the size is reduced
+    try:
+        doc = fitz.open(input_path)
+        image_found = False
+
+        # Iterate through pages to find and re-compress images
+        for page_num in range(len(doc)):
+            page = doc.load_page(page_num)
+            
+            # get_images(full=True) is the key to finding image references
+            for img_index, img in enumerate(page.get_images(full=True)):
+                xref = img[0] # The internal reference to the image
+                
+                # Extract the base image data
+                base_image = doc.extract_image(xref)
+                image_bytes = base_image["image"]
+                
+                # Load the image with PIL and save it back with new quality
+                pil_image = Image.open(io.BytesIO(image_bytes))
+                img_buffer = io.BytesIO()
+                pil_image.save(img_buffer, format="JPEG", quality=quality, optimize=True)
+                img_buffer.seek(0)
+                
+                # Replace the old image with the new compressed one
+                page.replace_image(xref, stream=img_buffer)
+                image_found = True
+
+        if not image_found:
+            logging.warning("No images found to compress in the PDF.")
+            doc.close()
+            return None # Return None if no images were processed
+
+        # Save the modified PDF with garbage collection to remove old objects
+        # This save operation is now OUTSIDE the loop for huge performance gain.
+        doc.save(output_path, garbage=4, deflate=True, clean=True)
+        doc.close()
+        return output_path
+    except Exception as e:
+        logging.error(f"Error during image re-compression: {e}")
+        return None
+
+def compress_pdf(input_path: str, output_dir: str, reduction_threshold: float = 0.75) -> str:
+  
+    os.makedirs(output_dir, exist_ok=True)
     original_size = os.path.getsize(input_path)
-    compressed_size = os.path.getsize(compressed_path)
-
-    if compressed_size < original_size*0.8:
-        print(f"PDF compressed using pypdf: {original_size/1024:.2f} KB -> {compressed_size/1024:.2f} KB")
-        return compressed_path
-    else:
-        os.remove(compressed_path)  # Remove the ineffective compressed file
-        print("pypdf compression did not reduce size, trying iterative image compression...")
-        # If not reduced, try iterative image compression
-        compressed_path_iter = iterative_image_compression(input_path, output_path)
-        compressed_size_iter = os.path.getsize(compressed_path_iter)
-
-        if compressed_size_iter < original_size:
-            print(f"PDF compressed using iterative image compression: {original_size/1024:.2f} KB -> {compressed_size_iter/1024:.2f} KB")
-            return compressed_path_iter
+    
+    # Fast Stream Compression ---
+    logging.info("Attempting fast stream compression...")
+    stream_compressed_path = _compress_pdf_streams(input_path, output_dir)
+    
+    if stream_compressed_path:
+        stream_compressed_size = os.path.getsize(stream_compressed_path)
+        if stream_compressed_size < original_size * reduction_threshold:
+            logging.info(f"Stream compression successful: {original_size/1024:.2f} KB -> {stream_compressed_size/1024:.2f} KB")
+            return stream_compressed_path
         else:
-            print("Iterative image compression also did not reduce size. Keeping original.")
-            return input_path  # Return original if no method worked
+            logging.warning("Stream compression was not effective. Removing temporary file.")
+            os.remove(stream_compressed_path)
 
+    #  Lossy Image Re-compression 
+    logging.info("Stream compression ineffective, attempting image re-compression...")
+    image_compressed_path = _compress_pdf_images(input_path, output_dir)
+    
+    if image_compressed_path:
+        image_compressed_size = os.path.getsize(image_compressed_path)
+        if image_compressed_size < original_size * reduction_threshold:
+            logging.info(f"Image compression successful: {original_size/1024:.2f} KB -> {image_compressed_size/1024:.2f} KB")
+            return image_compressed_path
+        else:
+            logging.warning("Image compression was not effective. Removing temporary file.")
+            os.remove(image_compressed_path)
 
-##Testing Purposess        
-##compress_pdf("/home/gtanmay/Documents/DOCS/hbtu.pdf","Temp/temp_pdfs/cache")
+    # Fallback: No effective compression ---
+    logging.warning("No compression method was effective. Copying original file.")
+    final_path = os.path.join(output_dir, os.path.basename(input_path))
+    shutil.copy2(input_path, final_path)
+    return final_path
+

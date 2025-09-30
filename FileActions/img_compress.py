@@ -3,7 +3,7 @@ import os
 import io
 import datetime
 
-def compress_image(input_path, output_dir, max_size=500, quality=95):
+def compress_image(input_path, output_dir, max_size=500, quality=85):
     """
     Compresses an image to be under a certain size.
     Returns the path to the compressed file, or the original path if no compression was needed.
