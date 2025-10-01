@@ -12,7 +12,7 @@ This project is a Telegram bot agent that provides a variety of file utilities (
 
 ```
 Telegram_Agent/
-├── download.py
+├── media_extractor.py
 ├── main.py
 ├── README.md
 ├── requirements.txt
@@ -51,15 +51,15 @@ Telegram_Agent/
 
 ### Root Files
 - **main.py**: Entry point for the Telegram bot. Handles all bot logic, message routing, file actions, and update integration. Also contains dormant Google/Notion integration logic.
-- **download.py**: Handles file downloading and saving utilities.
+- **media_extractor.py**: Handles file downloading and saving utilities.
 - **requirements.txt**: Python dependencies for the project.
-- **user_data.db**: Database for storing user-related data, history, and context.
+- **user_data.db**: Database for storing user-related data, history, and context.(not in repo cause for hosting purpose using supbase)
 - **README.md**: This documentation file.
 
 ### FileActions/
 - **img_compress.py**: Functions for compressing image files (JPEG, PNG, etc.).
 - **img-pdf.py**: Functions to convert images to PDF and extract images from PDFs.
-- **officefile-pdf.py**: Functions to convert Office files (docx, pptx, xlsx) to PDF.
+- **officefile-pdf.py**: Functions to convert Office files (docx, pptx, xlsx) to PDF.(not active )
 - **pdf-compress.py**: Functions for compressing and optimizing PDF files.
 - **__pycache__/**: Python bytecode cache for faster imports.
 
