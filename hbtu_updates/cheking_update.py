@@ -1,39 +1,11 @@
-import ast
-from hbtu_updates.fetching_links import scrape_top_links, write_links_to_file
-
-def file_to_list(filename='hbtu_updates/hbtu_links.txt'):
-    reconstructed_list = []
-    try:
-        with open(filename, 'r', encoding='utf-8') as f:
-            for line in f:
-                # remove things like newlines type shi
-                clean_line = line.strip()
-                if clean_line:  
-                    try:
-                        # ast.literal_eval safely evaluates the string as a Python literal (e.g., a tuple)
-                        # It's much safer than using the general-purpose eval()
-                        reconstructed_list.append(ast.literal_eval(clean_line))
-                    except (ValueError, SyntaxError):
-                        print(f"Warning: Skipping malformed line: {clean_line}")
-    except FileNotFoundError:
-        print(f"Error: The file '{filename}' was not found.")
-        return [] 
-        
-    print(f"✔️ Successfully loaded {len(reconstructed_list)} items from '{filename}'.")
-    return reconstructed_list
-
-  
-    
+try:
+    from hbtu_updates.fetching_links import scrape_top_links
+except ImportError:
+    from fetching_links import scrape_top_links
 
 
 
-def get_hbtu_links():
-    """
-    Main function to scrape links and return them as a list of tuples.
-    
-    Returns:
-        list: A list of tuples, where each tuple contains the text and the link.
-    """
+def check_for_updates():
     pages_to_scrape = {
         "Conference & Events": {
             "url": "https://hbtu.ac.in/conference-events/",
@@ -49,48 +21,21 @@ def get_hbtu_links():
         }
     }
 
-    all_links = []
-    print("Scraping links...")
-    
+    results = []
     for page_title, page_info in pages_to_scrape.items():
         print(f"Processing: {page_title}")
-
         data = scrape_top_links(
             url=page_info["url"],
             content_selector=page_info["selector"],
-            limit=5
+            limit=2
         )
-        
-        if data:
-            for item in data:
-                all_links.append((item['text'], item['link']))
-        else:
-            print(f"No links were found on the '{page_title}' page.")
-    
-    print("\n✔️ All done! Returning the list of links.")
-    return all_links
+        data.append({'source': page_title})
+        results.extend(data)
 
+    return results
 
-def check_for_updates():
+print(check_for_updates())
 
-    old_links = file_to_list()
-
-    new_links = get_hbtu_links()
-    diff = []
-
-    if new_links == old_links:
-        print("No new updates found.")
-    
-    else:
-        for link in new_links:
-            if link not in old_links:
-                diff.append(link)
-        write_links_to_file()
-    
-    return diff 
-
-##DEbugging purposes
-##print(check_for_updates())
         
     
     

@@ -3,7 +3,7 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
-def scrape_top_links(url, content_selector, limit=5):
+def scrape_top_links(url, content_selector, limit=2):
     
     scraped_data = []
     
@@ -83,6 +83,10 @@ def write_links_to_file():
                 f.write("No links were found on this page.\n\n")
     
     print(f"\n✔️ All done! The links have been saved to '{output_filename}'.")
+
+
+
+
 
 
 
