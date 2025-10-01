@@ -3,6 +3,7 @@ import logging
 import shutil
 import asyncio
 import dotenv
+import traceback
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.constants import ParseMode
@@ -41,7 +42,7 @@ logger = logging.getLogger(__name__)
 # Note: These are lost if the bot restarts. For persistence, consider a database or file storage.
 user_histories = {}
 user_actions = {}
-MAX_HISTORY_LENGTH = 20
+MAX_HISTORY_LENGTH = 10
 
 # --- Command Handlers ---
 
@@ -83,19 +84,29 @@ async def hbtu_updates_command(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text("No new updates found on the HBTU website.")
             return
 
-        prompt = (
+        
+        logger.info(f"Updates found: {new_updates}")
+
+        system_prompt = (
             "Format the following list of new university updates for a Telegram message. "
             "Use Telegram's MarkdownV2 formatting. Escape all special characters like '.' and '-'. "
             "For each item, make its title bold and then provide the link.\n\n"
             "make the updates present in a human readable way like here are the new updates i found\n\n"
+            
+        )
+
+        prompt =(
             f"Data: {new_updates}"
         )
-        formatted_response = generate_response(api_key=GEMINI_API_KEY, model_name=MODEL_NAME, prompt=prompt)
+
+        formatted_response = generate_response(api_key=GEMINI_API_KEY, model_name=MODEL_NAME, prompt=prompt, system_instruction=system_prompt)
         await update.message.reply_text(formatted_response, parse_mode=ParseMode.MARKDOWN_V2)
 
     except Exception as e:
-        logger.error(f"Error during HBTU update check: {e}")
-        await update.message.reply_text("Sorry, an error occurred while checking for updates.")
+        # --- THIS IS THE MODIFIED PART ---
+        error_details = traceback.format_exc()
+        logger.error(f"An exception occurred in hbtu_updates_command: {e}\n{error_details}")
+        await update.message.reply_text("Sorry, a critical error occurred while checking for updates. The developer has been notified.")
 
 # --- File Action Logic ---
 async def file_action_command(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str, message: str):
