@@ -1,5 +1,3 @@
-('Workshop on Intellectual Property Rights, 09th October 2025', 'https://hbtu.ac.in/Conference/Prof.%20Verma%20Workshop%20CST%202025.pdf')
-('Online International Conference on Frontiers of Pure and Applied Mathematics (FPAM - 2025) Organized by Department of Mathematics on November 6-7, 2025', 'https://sites.google.com/hbtu.ac.in/fpam2025/home')
 ('Call for Applications "MSME IDEA HACKATHON 5.0" Smart and Sustainable MSMEs', 'https://hbtu.ac.in/Conference/MSMS-Hackathon.pdf')
 ('One Week Summer Training on Skill Development (Technical & Soft Skills) for Students, July 14-19, 2025', 'https://hbtu.ac.in/Conference/experts%20from_merged.pdf')
 ('List of students selected for One Week Summer Training on Skill Development (Technical & Soft Skills) for Students, July 14-19, 2025', 'https://hbtu.ac.in/Conference/student%20list%20summer%20training-%202025.pdf')
@@ -10,6 +8,3 @@
 ('Notice for Even Semester of Registered Students in PhD programs Winter Session 2024-25', 'https://hbtu.ac.in/academics-notice/NOTICE%20FOR%20EVEN%20SEMESTER%20OF%20REGISTERED%20STUDENTS%20IN%20PHD%20PROGRAMS%20WINTER%20SESSION%202024-25.pdf')
 ('Invigilation Duty Chart for First Mid Sem. (Improvement) Examination 2025-26 (for B.Tech. Students)', 'https://hbtu.ac.in/academics-notice/Invigilation%20Duty%20Chart%20for%20First%20Mid%20Sem%20(Improvement)%20Exam%20%202025-26.pdf')
 ('Invigilation Duty Chart for First Mid Odd Sem. Examination 2025-26', 'https://hbtu.ac.in/academics-notice/Mid%20Sem%20I_%20Invigilation%20Duty_compressed.pdf')
-('Final Schedule of First Mid (Odd) Semester Examination [MSE]: 2025-26, scheduled from 22/09/2025 [Monday] to 27/09/2025 [Saturday].', 'https://hbtu.ac.in/academics-notice/Final%20Schedule%20for%20First%20Mid%20Odd%20%20Semester%202025-26.pdf')
-('INVIGILATION DUTY FOR END (EVEN) SEMESTER EXAMINATION  FOR THE SESSION 2024-2025', 'https://hbtu.ac.in/academics-notice/Invigilation%20duty%20end%20sem%20exam.pdf')
-('CORRECTED FINAL END (EVEN) SEMESTER EXAMINATION SCHEDULE FOR THE SESSION 2024-2025', 'https://hbtu.ac.in/academics-notice/CORRECTED%20FINAL%20END%20(EVEN)%20SEMESTER%20EXAMINATION%20SCHEDULE%20FOR%20THE%20SESSION%202024-2025.pdf')
