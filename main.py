@@ -46,11 +46,10 @@ MAX_HISTORY_LENGTH = 20
 # --- Command Handlers ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Sends a welcome message. Uses MarkdownV2 for formatting."""
-    # Escape special characters for MarkdownV2: '.', '-', '_'
+    
     welcome_text = (
-        "Hi\\! I'm ready to assist\\.\n\n"
-        "You can send me a message or a file for AI analysis\\.\n\n"
+        "Hi\\! I'm ready to assist you ask a question \\.\n\n"
+        "You can send me a photo of a question and i can provide you with solution\\.\n\n"
         "*Available Commands:*\n"
         "`/hbtu_updates` \\- Check for new HBTU circulars\\.\n"
         "`/compress_image` \\- Compresses an image\\.\n"
@@ -73,7 +72,7 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 # --- HBTU Update Command Handler ---
 async def hbtu_updates_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Checks for HBTU updates, formats them with Gemini, and sends them."""
+    """Checks for HBTU updates, formats and sends them."""
     user_id = update.message.from_user.id
     await update.message.reply_text("Checking for the latest HBTU updates, this may take a moment...")
     logger.info(f"User {user_id} initiated HBTU update check.")
@@ -217,6 +216,7 @@ async def analyze_file_with_brain(update: Update, context: ContextTypes.DEFAULT_
         prompt = update.message.caption or "Describe this file in detail, or if there are any questions in them , solve them and give user the detailed answers be it may questions in images or pdfs answer them all"
         response_text = generate_response(api_key=GEMINI_API_KEY, model_name=MODEL_NAME, prompt=prompt, file_path=file_path, conversation_history=get_user_history(update.message.from_user.id) )
         await update.message.reply_text(response_text)
+        add_to_history(update.message.from_user.id, "model", response_text) 
     except Exception as e:
         logger.error(f"Error in analyze_file_with_brain: {e}")
         await update.message.reply_text("An error occurred while analyzing the file.")
