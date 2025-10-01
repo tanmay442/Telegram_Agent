@@ -6,7 +6,6 @@ import dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.constants import ParseMode
-import mimetypes
 
 
 from FileActions.img_compress import compress_image
@@ -27,7 +26,7 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 MODEL_NAME = os.environ.get("MODEL_NAME")
 
-# --- Directory Setup for File Actions ---
+
 OUTPUT_DIR = "Temp/Output"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -38,19 +37,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
+# --- In-Memory State & History ---
+# Note: These are lost if the bot restarts. For persistence, consider a database or file storage.
 user_histories = {}
 user_actions = {}
-MAX_HISTORY_LENGTH = 20 # Reduced for practicality with large file data
+MAX_HISTORY_LENGTH = 20
 
 # --- Command Handlers ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sends a welcome message. Uses MarkdownV2 for formatting."""
+    # Escape special characters for MarkdownV2: '.', '-', '_'
     welcome_text = (
         "Hi\\! I'm ready to assist\\.\n\n"
-        "You can send me a message or a file for AI analysis\\. "
-        "I'll remember the file so you can ask follow\\-up questions\\.\n\n"
+        "You can send me a message or a file for AI analysis\\.\n\n"
         "*Available Commands:*\n"
         "`/hbtu_updates` \\- Check for new HBTU circulars\\.\n"
         "`/compress_image` \\- Compresses an image\\.\n"
@@ -118,53 +118,21 @@ async def to_images_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 # --- History Management ---
 def get_user_history(user_id: int) -> list:
-    """Retrieves the conversation history for a user."""
     return user_histories.setdefault(user_id, [])
-
-def add_to_history(user_id: int, role: str, text: str = None, file_blob: dict = None):
-    """
-    Adds a turn to the user's conversation history.
-    A turn can contain text, a file blob, or both.
-    """
+def add_to_history(user_id: int, role: str, text: str):
     history = get_user_history(user_id)
-    
-    parts = []
-    if text:
-        parts.append(text)
-    if file_blob:
-        parts.append(file_blob)
-
-    if not parts: # Do not add empty history turns
-        return
-
-    history.append({'role': role, 'parts': parts})
-    
-    # Trim history if it exceeds the maximum length
+    history.append({'role': role, 'parts': [text]})
     if len(history) > MAX_HISTORY_LENGTH:
         user_histories[user_id] = history[-MAX_HISTORY_LENGTH:]
 
-def get_mime_type(file_path: str) -> str:
-    """Helper to get the mime type of a file."""
-    mime_type, _ = mimetypes.guess_type(file_path)
-    return mime_type or "application/octet-stream" # Default if not found
-
 # --- Core Message & Media Handlers ---
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Processes text messages using the Brain module, maintaining context."""
+    """Processes text messages using the Brain module."""
     user_id = update.message.from_user.id
     text = update.message.text
-    
-    add_to_history(user_id, "user", text=text)
-    
-    # The history now may contain file context from a previous turn
-    response_text = generate_response(
-        api_key=GEMINI_API_KEY, 
-        model_name=MODEL_NAME, 
-        prompt=None, # Prompt is now part of the history
-        conversation_history=get_user_history(user_id)
-    )
-    
-    add_to_history(user_id, "model", text=response_text)
+    add_to_history(user_id, "user", text)
+    response_text = generate_response(api_key=GEMINI_API_KEY, model_name=MODEL_NAME, prompt=text, conversation_history=get_user_history(user_id))
+    add_to_history(user_id, "model", response_text)
     await update.message.reply_text(response_text)
 
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -180,6 +148,7 @@ async def process_file_action(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Processes a file based on a pending user command with validation."""
     user_id = update.message.from_user.id
     
+    # --- File Type Validation ---
     action_requirements = {
         'compress_image': {'type': 'photo', 'message': 'Please send an image file for this action.'},
         'to_pdf': {'type': 'photo', 'message': 'Please send an image file for this action.'},
@@ -200,7 +169,8 @@ async def process_file_action(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(req['message'] + "\nOr type /cancel to stop.")
         return
         
-    del user_actions[user_id]
+    # --- If file is valid, proceed ---
+    del user_actions[user_id] # Clear the action state
     await update.message.reply_text(f"File received. Starting '{action}'...")
     
     input_path, output_path = None, None
@@ -220,7 +190,7 @@ async def process_file_action(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await update.message.reply_text("Action complete. Sending your files...")
                 for filename in sorted(os.listdir(output_path)):
                     await context.bot.send_document(chat_id=user_id, document=open(os.path.join(output_path, filename), 'rb'))
-            else:
+            else: # Single file output
                 await update.message.reply_text("Action complete. Sending your file...")
                 await context.bot.send_document(chat_id=user_id, document=open(output_path, 'rb'))
         else:
@@ -229,68 +199,29 @@ async def process_file_action(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.error(f"Error during file action '{action}': {e}")
         await update.message.reply_text(f"An error occurred: {e}")
     finally:
+        # Cleanup
         if input_path and os.path.exists(input_path): os.remove(input_path)
         if output_path and output_path != input_path and os.path.exists(output_path):
             if os.path.isdir(output_path): shutil.rmtree(output_path)
             else: os.remove(output_path)
 
 async def analyze_file_with_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Analyzes a file with the AI and sets it in the conversation context
-    for follow-up questions.
-    """
-    user_id = update.message.from_user.id
+    """Sends a media file to the Brain module for analysis."""
     file_id = update.message.photo[-1].file_id if update.message.photo else update.message.document.file_id
-    if not file_id:
-        return await update.message.reply_text("File type not suitable for analysis.")
+    if not file_id: return await update.message.reply_text("File type not suitable for analysis.")
 
     await update.message.reply_text('File received, analyzing with AI...')
     file_path = None
     try:
         file_path = await extract_file(context.bot, file_id)
-        if not file_path:
-            raise ValueError("Could not download file.")
-            
-        # Clear previous history to start a new context with this file
-        if user_id in user_histories:
-            user_histories[user_id].clear()
-            logger.info(f"Cleared history for user {user_id} to start new file context.")
-
-        # Read file into memory
-        with open(file_path, "rb") as f:
-            file_bytes = f.read()
-
-        file_blob = {
-            "mime_type": get_mime_type(file_path),
-            "data": file_bytes,
-        }
-        
-        prompt = update.message.caption or "Describe this file in detail. What is it?"
-
-        # Add the initial prompt and the file to the history
-        add_to_history(user_id, "user", text=prompt, file_blob=file_blob)
-
-        # Generate the first response
-        response_text = generate_response(
-            api_key=GEMINI_API_KEY, 
-            model_name=MODEL_NAME, 
-            prompt=None, # Prompt is now in the history
-            file_path=None, # File is now in the history
-            conversation_history=get_user_history(user_id)
-        )
-        
-        # Add the AI's first response to the history
-        add_to_history(user_id, "model", text=response_text)
-        
+        prompt = update.message.caption or "Describe this file in detail, or if there are any questions in them , solve them and give user the detailed answers be it may questions in images or pdfs answer them all"
+        response_text = generate_response(api_key=GEMINI_API_KEY, model_name=MODEL_NAME, prompt=prompt, file_path=file_path, conversation_history=get_user_history(update.message.from_user.id) )
         await update.message.reply_text(response_text)
-
     except Exception as e:
         logger.error(f"Error in analyze_file_with_brain: {e}")
         await update.message.reply_text("An error occurred while analyzing the file.")
     finally:
-        # Clean up the downloaded file immediately after reading it
-        if file_path and os.path.exists(file_path):
-            os.remove(file_path)
+        if file_path and os.path.exists(file_path): os.remove(file_path)
 
 def main() -> None:
     """Start the bot."""
