@@ -217,8 +217,14 @@ async def process_file_action(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def analyze_file_with_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Sends a media file to the Brain module for analysis."""
-    file_id = update.message.photo[-1].file_id if update.message.photo else update.message.document.file_id
-    if not file_id: return await update.message.reply_text("File type not suitable for analysis.")
+    file_id = None
+    if update.message.photo:
+        file_id = update.message.photo[-1].file_id
+    elif update.message.document:
+        file_id = update.message.document.file_id
+
+    if not file_id:
+        return await update.message.reply_text("File type not suitable for analysis.")
 
     await update.message.reply_text('File received, analyzing with AI...')
     file_path = None
