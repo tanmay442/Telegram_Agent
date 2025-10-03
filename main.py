@@ -13,9 +13,9 @@ from FileActions.img_compress import compress_image
 from FileActions.pdf_compress import compress_pdf
 from FileActions.img_pdf import convert_image_to_pdf, convert_pdf_to_images
 
-from Google_serviecs.mail_services import draft_email, read_emails, flag_or_label_mail
-from Google_serviecs.caleander_services import create_event, view_events, delete_event
-from Google_serviecs.tasks_services import create_task, view_tasks, modify_task, create_task_list
+#from Google_serviecs.mail_services import draft_email, read_emails, flag_or_label_mail
+#from Google_serviecs.caleander_services import create_event, view_events, delete_event
+#from Google_serviecs.tasks_services import create_task, view_tasks, modify_task, create_task_list
 
 from hbtu_updates.cheking_update import check_for_updates
 from media_extractor import extract_file
