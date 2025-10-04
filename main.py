@@ -232,8 +232,14 @@ async def analyze_file_with_brain(update: Update, context: ContextTypes.DEFAULT_
         file_path = await extract_file(context.bot, file_id)
         prompt = update.message.caption or "Describe this file in detail, or if there are any questions in them , solve them and give user the detailed answers be it may questions in images or pdfs answer them all"
         response_text = generate_response(api_key=GEMINI_API_KEY, model_name=MODEL_NAME, prompt=prompt, file_path=file_path, conversation_history=get_user_history(update.message.from_user.id) )
-        await update.message.reply_text(response_text)
-        add_to_history(update.message.from_user.id, "model", response_text) 
+        # Telegram message limit is 4096 characters
+        MAX_MSG_LEN = 4096
+        if len(response_text) > MAX_MSG_LEN:
+            for i in range(0, len(response_text), MAX_MSG_LEN):
+                await update.message.reply_text(response_text[i:i+MAX_MSG_LEN])
+        else:
+            await update.message.reply_text(response_text)
+        add_to_history(update.message.from_user.id, "model", response_text)
     except Exception as e:
         logger.error(f"Error in analyze_file_with_brain: {e}")
         await update.message.reply_text("An error occurred while analyzing the file.")
