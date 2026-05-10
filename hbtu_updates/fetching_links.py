@@ -2,25 +2,28 @@ import os
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
+import logging
 
-def scrape_top_links(url, content_selector, limit=2):
-    
+logger = logging.getLogger(__name__)
+
+
+def scrape_top_links(url: str, content_selector: str, limit: int = 2) -> list[dict]:
     scraped_data = []
-    
+
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
-    
+
     try:
         response = requests.get(url, headers=headers, timeout=15)
         response.raise_for_status()
 
         soup = BeautifulSoup(response.content, 'html.parser')
-        
+
         content_area = soup.select_one(content_selector)
-        
+
         if not content_area:
-            print(f"Warning: Could not find content area with selector '{content_selector}' on {url}")
+            logger.warning(f"Could not find content area with selector '{content_selector}' on {url}")
             return []
 
         links = content_area.find_all('a', limit=limit)
@@ -28,23 +31,21 @@ def scrape_top_links(url, content_selector, limit=2):
         for link_tag in links:
             text = link_tag.get_text(strip=True)
             href = link_tag.get('href')
-            
+
             if text and href:
                 full_link = urljoin(url, href)
                 scraped_data.append({
                     'text': text,
                     'link': full_link
                 })
-            
+
     except requests.exceptions.RequestException as e:
-        print(f"An error occurred while trying to fetch the URL {url}: {e}")
-        
+        logger.error(f"Failed to fetch URL {url}: {e}")
+
     return scraped_data
 
-def write_links_to_file():
-    """
-    Main function to scrape links and save them to a text file.
-    """
+
+def write_links_to_file() -> None:
     output_filename = 'hbtu_updates/hbtu_links.txt'
 
     pages_to_scrape = {
@@ -54,39 +55,28 @@ def write_links_to_file():
         },
         "Academic Circulars": {
             "url": "https://hbtu.ac.in/academic-circular/",
-            "selector": ".entry-content" 
+            "selector": ".entry-content"
         },
         "Examination Circulars": {
             "url": "https://hbtu.ac.in/examinations/",
-            "selector": "#e-n-tab-content-9783400146" # Specific selector for the correct tab
+            "selector": "#e-n-tab-content-9783400146"
         }
     }
 
-    # Open the file in write mode ('w') which will overwrite the file if it exists
     with open(output_filename, 'w', encoding='utf-8') as f:
-        print(f"Scraping links and saving to '{output_filename}'...")
-        
-        for page_title, page_info in pages_to_scrape.items():
-            #f.write(f"--- Links from: {page_title} ---\n")
-            #print(f"Processing: {page_title}")
+        logger.info("Scraping links and saving to file...")
 
+        for page_title, page_info in pages_to_scrape.items():
             data = scrape_top_links(
                 url=page_info["url"],
                 content_selector=page_info["selector"],
                 limit=5
             )
-            
+
             if data:
                 for item in data:
                     f.write(f"('{item['text']}', '{item['link']}')\n")
             else:
                 f.write("No links were found on this page.\n\n")
-    
-    print(f"\n✔️ All done! The links have been saved to '{output_filename}'.")
 
-
-
-
-
-
-
+    logger.info("Links saved to '%s'.", output_filename)

@@ -1,17 +1,18 @@
 import google.generativeai as genai
-import os
+import logging
+from typing import Optional, Any
+
+logger = logging.getLogger(__name__)
+
 
 def generate_response(
     api_key: str,
     model_name: str,
     prompt: str,
-    system_instruction: str = None,
-    file_path: str = None,
-    conversation_history: list = None
-):
-    """
-    Generates a response from the Gemini model, handling text, files, and history.
-    """
+    system_instruction: Optional[str] = None,
+    file_path: Optional[str] = None,
+    conversation_history: Optional[list[dict[str, Any]]] = None
+) -> str:
     try:
         genai.configure(api_key=api_key)
 
@@ -19,35 +20,38 @@ def generate_response(
             model_name,
             system_instruction=system_instruction
         )
-        
-        # Start with the existing conversation history if it exists
+
         chat_history = conversation_history or []
 
-        # Prepare the user's new message (prompt)
-        user_prompt_parts = []
-        
-        # If there's a file, upload it and add it to the parts
-        uploaded_file = None
+        user_prompt_parts: list[Any] = []
+        uploaded_file: Optional[Any] = None
+
         if file_path:
-            uploaded_file = genai.upload_file(path=file_path)
-            user_prompt_parts.append(uploaded_file)
-        
-        # Add the text part of the prompt
+            try:
+                uploaded_file = genai.upload_file(path=file_path)
+                user_prompt_parts.append(uploaded_file)
+            except Exception as e:
+                logger.error("Failed to upload file %s: %s", file_path, e)
+                return f"Failed to upload file: {e}"
+
         user_prompt_parts.append(prompt)
 
-        # Combine the history with the new user message
         content_to_send = chat_history + [{'role': 'user', 'parts': user_prompt_parts}]
 
-        # Generate the content
-        response = model.generate_content(content_to_send)
+        try:
+            response = model.generate_content(content_to_send)
+        except Exception as e:
+            logger.error("Gemini API error: %s", e)
+            return f"AI error: {e}"
 
-        # Clean up the uploaded file if it exists
         if uploaded_file:
-            genai.delete_file(uploaded_file.name)
+            try:
+                genai.delete_file(uploaded_file.name)
+            except Exception as e:
+                logger.warning("Failed to delete uploaded file: %s", e)
 
         return response.text
 
     except Exception as e:
-        # It's good practice to log the full error for debugging
-        print(f"Error in generate_response: {e}")
+        logger.error("Unexpected error in generate_response: %s", e)
         return f"An error occurred: {e}"

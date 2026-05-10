@@ -2,21 +2,17 @@ import os
 import logging
 import shutil
 import asyncio
+import signal
+import sys
 import dotenv
 import traceback
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.constants import ParseMode
-
 
 from FileActions.img_compress import compress_image
 from FileActions.pdf_compress import compress_pdf
 from FileActions.img_pdf import convert_image_to_pdf, convert_pdf_to_images
-
-#from Google_serviecs.mail_services import draft_email, read_emails, flag_or_label_mail
-#from Google_serviecs.caleander_services import create_event, view_events, delete_event
-#from Google_serviecs.tasks_services import create_task, view_tasks, modify_task, create_task_list
-
 from hbtu_updates.cheking_update import check_for_updates
 from media_extractor import extract_file
 from Brain import generate_response
@@ -27,56 +23,58 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 MODEL_NAME = os.environ.get("MODEL_NAME")
 
-
 OUTPUT_DIR = "Temp/Output"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# --- Logging Setup ---
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# --- In-Memory State & History ---
-# Note: These are lost if the bot restarts. For persistence, consider a database or file storage.
-user_histories = {}
-user_actions = {}
+user_histories: dict[int, list] = {}
+user_actions: dict[int, str] = {}
 MAX_HISTORY_LENGTH = 10
 
-# --- Command Handlers ---
+shutdown_event = asyncio.Event()
+
+
+def escape_markdown_v2(text: str) -> str:
+    escape_chars = r'_*[]()~`>#+-=|{}.!'
+    for char in escape_chars:
+        text = text.replace(char, f'\\{char}')
+    return text
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    
     welcome_text = (
-        "Hi\\! I'm ready to assist you ask a question \\.\n\n"
-        "You can send me a photo of a question and i can provide you with solution\\.\n\n"
+        "Hi! I'm ready to assist you.\n\n"
+        "You can send me a photo of a question and I can provide solutions.\n\n"
         "*Available Commands:*\n"
-        "`/hbtu_updates` \\- Check for new HBTU circulars\\.\n"
-        "`/compress_image` \\- Compresses an image\\.\n"
-        "`/compress_pdf` \\- Compresses a PDF\\.\n"
-        "`/to_pdf` \\- Converts an image to a PDF\\.\n"
-        "`/to_images` \\- Converts a PDF to images\\.\n"
-        "`/cancel` \\- Cancel the current file operation\\."
+        "/hbtu_updates - Check for new HBTU circulars\n"
+        "/compress_image - Compress an image\n"
+        "/compress_pdf - Compress a PDF\n"
+        "/to_pdf - Convert image to PDF\n"
+        "/to_images - Convert PDF to images\n"
+        "/cancel - Cancel current operation"
     )
     await update.message.reply_text(welcome_text, parse_mode=ParseMode.MARKDOWN_V2)
 
+
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Cancels any pending user action."""
     user_id = update.message.from_user.id
     if user_id in user_actions:
         del user_actions[user_id]
-        logger.info(f"User {user_id} canceled their action.")
+        logger.info("User %s canceled their action.", user_id)
         await update.message.reply_text("Your current action has been canceled.")
     else:
         await update.message.reply_text("You have no active action to cancel.")
 
-# --- HBTU Update Command Handler ---
+
 async def hbtu_updates_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Checks for HBTU updates, formats and sends them."""
     user_id = update.message.from_user.id
     await update.message.reply_text("Checking for the latest HBTU updates, this may take a moment...")
-    logger.info(f"User {user_id} initiated HBTU update check.")
+    logger.info("User %s initiated HBTU update check.", user_id)
 
     try:
         new_updates = await asyncio.to_thread(check_for_updates)
@@ -84,69 +82,85 @@ async def hbtu_updates_command(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text("No new updates found on the HBTU website.")
             return
 
-        
-        logger.info(f"Updates found: {new_updates}")
+        logger.info("Found %d updates.", len(new_updates))
 
         system_prompt = (
-            "Format the following list of new university updates for a Telegram message. "
-            "Use Telegram's MarkdownV2 formatting. Escape all special characters like '.' and '-'. "
-            "For each item, make its title bold and then provide the link.\n\n"
-            "make the updates present in a human readable way like here are the new updates i found\n\n"
-            
+            "Format the following university updates for a Telegram message. "
+            "Use Telegram MarkdownV2 formatting. "
+            "Present updates in a human-readable way with bold titles and links.\n"
+            "Source: Exam | Academic | Conference"
         )
 
-        prompt =(
-            f"Data: {new_updates}"
+        prompt = f"Data: {new_updates}"
+        formatted_response = generate_response(
+            api_key=GEMINI_API_KEY,
+            model_name=MODEL_NAME,
+            prompt=prompt,
+            system_instruction=system_prompt
         )
-
-        formatted_response = generate_response(api_key=GEMINI_API_KEY, model_name=MODEL_NAME, prompt=prompt, system_instruction=system_prompt)
         await update.message.reply_text(formatted_response, parse_mode=ParseMode.MARKDOWN_V2)
 
-    except Exception as e:
-        # --- THIS IS THE MODIFIED PART ---
+    except Exception:
         error_details = traceback.format_exc()
-        logger.error(f"An exception occurred in hbtu_updates_command: {e}\n{error_details}")
-        await update.message.reply_text("Sorry, a critical error occurred while checking for updates. The developer has been notified.")
+        logger.error("HBTU update error: %s\n%s", update, error_details)
+        await update.message.reply_text("An error occurred while checking updates. Please try again later.")
 
-# --- File Action Logic ---
+
 async def file_action_command(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str, message: str):
-    """Sets a user's pending file action."""
     user_id = update.message.from_user.id
     user_actions[user_id] = action
-    logger.info(f"User {user_id} initiated action: {action}")
+    logger.info("User %s initiated action: %s", user_id, action)
     await update.message.reply_text(message)
 
-# --- Command Definitions ---
+
 async def compress_image_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await file_action_command(update, context, 'compress_image', 'Please send the image you want to compress.')
+
+
 async def compress_pdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await file_action_command(update, context, 'compress_pdf', 'Please send the PDF you want to compress.')
+
+
 async def to_pdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await file_action_command(update, context, 'to_pdf', 'Please send the image to convert to a PDF.')
+    await file_action_command(update, context, 'to_pdf', 'Please send the image to convert to PDF.')
+
+
 async def to_images_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await file_action_command(update, context, 'to_images', 'Please send the PDF to convert into images.')
 
-# --- History Management ---
+
 def get_user_history(user_id: int) -> list:
     return user_histories.setdefault(user_id, [])
+
+
 def add_to_history(user_id: int, role: str, text: str):
     history = get_user_history(user_id)
     history.append({'role': role, 'parts': [text]})
     if len(history) > MAX_HISTORY_LENGTH:
         user_histories[user_id] = history[-MAX_HISTORY_LENGTH:]
 
-# --- Core Message & Media Handlers ---
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Processes text messages using the Brain module."""
     user_id = update.message.from_user.id
     text = update.message.text
     add_to_history(user_id, "user", text)
-    response_text = generate_response(api_key=GEMINI_API_KEY, model_name=MODEL_NAME, prompt=text, conversation_history=get_user_history(user_id))
+
+    try:
+        response_text = generate_response(
+            api_key=GEMINI_API_KEY,
+            model_name=MODEL_NAME,
+            prompt=text,
+            conversation_history=get_user_history(user_id)
+        )
+    except Exception as e:
+        logger.error("Brain error for user %s: %s", user_id, e)
+        response_text = "Sorry, I encountered an error. Please try again."
+
     add_to_history(user_id, "model", response_text)
     await update.message.reply_text(response_text)
 
+
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Routes media to a file action or to the Brain for analysis."""
     user_id = update.message.from_user.id
     action = user_actions.get(user_id)
     if action:
@@ -154,20 +168,21 @@ async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     else:
         await analyze_file_with_brain(update, context)
 
+
 async def process_file_action(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str):
-    """Processes a file based on a pending user command with validation."""
     user_id = update.message.from_user.id
-    
-    # --- File Type Validation ---
+
     action_requirements = {
         'compress_image': {'type': 'photo', 'message': 'Please send an image file for this action.'},
         'to_pdf': {'type': 'photo', 'message': 'Please send an image file for this action.'},
-        'compress_pdf': {'type': 'document', 'mime': 'application/pdf', 'message': 'Please send a PDF document for this action.'},
-        'to_images': {'type': 'document', 'mime': 'application/pdf', 'message': 'Please send a PDF document for this action.'},
+        'compress_pdf': {'type': 'document', 'mime': 'application/pdf', 'message': 'Please send a PDF document.'},
+        'to_images': {'type': 'document', 'mime': 'application/pdf', 'message': 'Please send a PDF document.'},
     }
     req = action_requirements[action]
-    
+
     valid_file = False
+    file_id = None
+
     if req['type'] == 'photo' and update.message.photo:
         valid_file = True
         file_id = update.message.photo[-1].file_id
@@ -178,45 +193,61 @@ async def process_file_action(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not valid_file:
         await update.message.reply_text(req['message'] + "\nOr type /cancel to stop.")
         return
-        
-    # --- If file is valid, proceed ---
-    del user_actions[user_id] # Clear the action state
+
+    del user_actions[user_id]
     await update.message.reply_text(f"File received. Starting '{action}'...")
-    
-    input_path, output_path = None, None
+
+    input_path = None
+    output_path = None
+
     try:
         input_path = await extract_file(context.bot, file_id)
         if not input_path:
             raise ValueError("File could not be downloaded from Telegram.")
 
-        action_func = {
-            'compress_image': compress_image, 'compress_pdf': compress_pdf,
-            'to_pdf': convert_image_to_pdf, 'to_images': convert_pdf_to_images
-        }[action]
-        output_path = action_func(input_path, OUTPUT_DIR)
+        action_funcs = {
+            'compress_image': compress_image,
+            'compress_pdf': compress_pdf,
+            'to_pdf': convert_image_to_pdf,
+            'to_images': convert_pdf_to_images
+        }
+        output_path = action_funcs[action](input_path, OUTPUT_DIR)
 
         if output_path and os.path.exists(output_path):
             if os.path.isdir(output_path):
                 await update.message.reply_text("Action complete. Sending your files...")
                 for filename in sorted(os.listdir(output_path)):
-                    await context.bot.send_document(chat_id=user_id, document=open(os.path.join(output_path, filename), 'rb'))
-            else: # Single file output
+                    filepath = os.path.join(output_path, filename)
+                    with open(filepath, 'rb') as f:
+                        await context.bot.send_document(chat_id=user_id, document=f)
+            else:
                 await update.message.reply_text("Action complete. Sending your file...")
-                await context.bot.send_document(chat_id=user_id, document=open(output_path, 'rb'))
+                with open(output_path, 'rb') as f:
+                    await context.bot.send_document(chat_id=user_id, document=f)
         else:
-            await update.message.reply_text("The action failed or the file was already optimal and no changes were made.")
+            await update.message.reply_text("The action failed or no changes were made.")
+
     except Exception as e:
-        logger.error(f"Error during file action '{action}': {e}")
+        logger.error("File action '%s' error for user %s: %s", action, user_id, e)
         await update.message.reply_text(f"An error occurred: {e}")
+
     finally:
-        # Cleanup
-        if input_path and os.path.exists(input_path): os.remove(input_path)
+        if input_path and os.path.exists(input_path):
+            try:
+                os.remove(input_path)
+            except OSError:
+                pass
         if output_path and output_path != input_path and os.path.exists(output_path):
-            if os.path.isdir(output_path): shutil.rmtree(output_path)
-            else: os.remove(output_path)
+            if os.path.isdir(output_path):
+                shutil.rmtree(output_path, ignore_errors=True)
+            else:
+                try:
+                    os.remove(output_path)
+                except OSError:
+                    pass
+
 
 async def analyze_file_with_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Sends a media file to the Brain module for analysis."""
     file_id = None
     if update.message.photo:
         file_id = update.message.photo[-1].file_id
@@ -228,29 +259,52 @@ async def analyze_file_with_brain(update: Update, context: ContextTypes.DEFAULT_
 
     await update.message.reply_text('File received, analyzing with AI...')
     file_path = None
+
     try:
         file_path = await extract_file(context.bot, file_id)
-        prompt = update.message.caption or "Describe this file in detail, or if there are any questions in them , solve them and give user the detailed answers be it may questions in images or pdfs answer them all"
-        response_text = generate_response(api_key=GEMINI_API_KEY, model_name=MODEL_NAME, prompt=prompt, file_path=file_path, conversation_history=get_user_history(update.message.from_user.id) )
-        # Telegram message limit is 4096 characters
+        if not file_path:
+            await update.message.reply_text("Failed to download file. Please try again.")
+            return
+
+        prompt = update.message.caption or "Describe this file in detail. If there are questions, solve them with detailed answers."
+        response_text = generate_response(
+            api_key=GEMINI_API_KEY,
+            model_name=MODEL_NAME,
+            prompt=prompt,
+            file_path=file_path,
+            conversation_history=get_user_history(update.message.from_user.id)
+        )
+
         MAX_MSG_LEN = 4096
         if len(response_text) > MAX_MSG_LEN:
             for i in range(0, len(response_text), MAX_MSG_LEN):
                 await update.message.reply_text(response_text[i:i+MAX_MSG_LEN])
         else:
             await update.message.reply_text(response_text)
+
         add_to_history(update.message.from_user.id, "model", response_text)
+
     except Exception as e:
-        logger.error(f"Error in analyze_file_with_brain: {e}")
+        logger.error("Brain analysis error: %s", e)
         await update.message.reply_text("An error occurred while analyzing the file.")
+
     finally:
-        if file_path and os.path.exists(file_path): os.remove(file_path)
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+
+
+async def shutdown_signal_handler(app: Application, signal_received: int, loop: asyncio.AbstractEventLoop):
+    logger.info("Shutdown signal received (signal %d). Stopping bot...", signal_received)
+    shutdown_event.set()
+    await app.stop()
+
 
 def main() -> None:
-    """Start the bot."""
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    # Command Handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(CommandHandler("hbtu_updates", hbtu_updates_command))
@@ -258,13 +312,17 @@ def main() -> None:
     application.add_handler(CommandHandler("compress_pdf", compress_pdf_command))
     application.add_handler(CommandHandler("to_pdf", to_pdf_command))
     application.add_handler(CommandHandler("to_images", to_images_command))
-
-    # Message Handlers
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(MessageHandler((filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, handle_media))
 
+    loop = asyncio.get_event_loop()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown_signal_handler(application, s, loop)))
+
     logger.info("Bot is starting...")
-    application.run_polling()
+    application.run_polling(stop_event=shutdown_event)
+
 
 if __name__ == '__main__':
     main()

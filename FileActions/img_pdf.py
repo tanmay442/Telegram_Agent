@@ -1,67 +1,53 @@
 from PIL import Image
 import img2pdf
-import fitz  # PyMuPDF
+import fitz
 import os
 import datetime
+import logging
 
-def convert_image_to_pdf(image_path, pdf_path):
-    #image_path = "input_image.jpg"
-    pdf_path = os.path.join(pdf_path,f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf")
+logger = logging.getLogger(__name__)
+
+
+def convert_image_to_pdf(image_path: str, output_dir: str) -> str | None:
+    file_name = f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+    pdf_path = os.path.join(output_dir, file_name)
 
     try:
-        # Open the image using Pillow
         image = Image.open(image_path)
-
-        # converting into chunks using img2pdf
         pdf_bytes = img2pdf.convert(image.filename)
 
-        # Write the PDF bytes to a file
         with open(pdf_path, "wb") as f:
             f.write(pdf_bytes)
 
-        print(f"Successfully converted {image_path} to {pdf_path}")
+        logger.info("Converted %s to %s", image_path, pdf_path)
+        return pdf_path
 
     except FileNotFoundError:
-        print(f"Error: Image file not found at {image_path}")
+        logger.error("Image file not found: %s", image_path)
+        return None
     except Exception as e:
-        print(f"An error occurred: {e}")
-    
-    return pdf_path
+        logger.error("Image to PDF conversion error: %s", e)
+        return None
 
 
-##testing purposes
-##convert_image_to_pdf("wallpaper.jpg","Temp/temp_pdfs")
-
-
-def convert_pdf_to_images(pdf_path, output_directory):
-
-    #pdf_path = "example.pdf"
-    output_directory=os.path.join(output_directory,f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_images")
-    os.makedirs(output_directory, exist_ok=True)
-
-    ##Qua;ity control
-    high_res_dpi = 300 
+def convert_pdf_to_images(pdf_path: str, output_dir: str, dpi: int = 300) -> str | None:
+    output_subdir = os.path.join(output_dir, f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_images")
+    os.makedirs(output_subdir, exist_ok=True)
 
     try:
         doc = fitz.open(pdf_path)
         for i, page in enumerate(doc):
-            # Render page 
-            pix = page.get_pixmap(dpi=high_res_dpi)
-            
-            # Save the image
-            image_path = os.path.join(output_directory, f"page_{i+1}.jpg")
+            pix = page.get_pixmap(dpi=dpi)
+            image_path = os.path.join(output_subdir, f"page_{i+1}.jpg")
             pix.save(image_path)
-        
         doc.close()
-        print(f"Converted '{pdf_path}' to high-resolution images in '{output_directory}'")
+
+        logger.info("Converted %s to %d images in %s", pdf_path, len(doc), output_subdir)
+        return output_subdir
 
     except FileNotFoundError:
-        print(f"Error: The file '{pdf_path}' was not found")
+        logger.error("PDF file not found: %s", pdf_path)
+        return None
     except Exception as e:
-        print(f"An error occurred: {e}")
-    
-    return output_directory
-
-
-##testing purposes
-##convert_pdf_to_images("/home/gtanmay/Documents/DOCS/hbtu.pdf","Temp/temp_images")   
+        logger.error("PDF to images conversion error: %s", e)
+        return None
