@@ -3,10 +3,9 @@ import logging
 import shutil
 import asyncio
 import signal
-import sys
 import dotenv
 import traceback
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.constants import ParseMode
 
@@ -16,6 +15,7 @@ from FileActions.img_pdf import convert_image_to_pdf, convert_pdf_to_images
 from hbtu_updates.cheking_update import check_for_updates
 from media_extractor import extract_file
 from Brain import generate_response
+from session_manager import SessionManager, ActionState
 
 dotenv.load_dotenv()
 
@@ -32,18 +32,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-user_histories: dict[int, list] = {}
-user_actions: dict[int, str] = {}
-MAX_HISTORY_LENGTH = 10
-
 shutdown_event = asyncio.Event()
-
-
-def escape_markdown_v2(text: str) -> str:
-    escape_chars = r'_*[]()~`>#+-=|{}.!'
-    for char in escape_chars:
-        text = text.replace(char, f'\\{char}')
-    return text
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -63,8 +52,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.message.from_user.id
-    if user_id in user_actions:
-        del user_actions[user_id]
+    sm = SessionManager()
+    if sm.get_session(user_id).action_state != ActionState.NONE:
+        sm.clear_action(user_id)
         logger.info("User %s canceled their action.", user_id)
         await update.message.reply_text("Your current action has been canceled.")
     else:
@@ -102,100 +92,114 @@ async def hbtu_updates_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
     except Exception:
         error_details = traceback.format_exc()
-        logger.error("HBTU update error: %s\n%s", update, error_details)
+        logger.error("HBTU update error: %s\n%s", user_id, error_details)
         await update.message.reply_text("An error occurred while checking updates. Please try again later.")
 
 
-async def file_action_command(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str, message: str):
+def set_action_state(update: Update, state: ActionState, message: str):
     user_id = update.message.from_user.id
-    user_actions[user_id] = action
-    logger.info("User %s initiated action: %s", user_id, action)
-    await update.message.reply_text(message)
+    sm = SessionManager()
+    sm.set_action(user_id, state)
+    return message
 
 
 async def compress_image_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await file_action_command(update, context, 'compress_image', 'Please send the image you want to compress.')
+    await update.message.reply_text(
+        set_action_state(update, ActionState.WAITING_FOR_IMAGE_COMPRESS, 'Please send the image you want to compress.')
+    )
 
 
 async def compress_pdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await file_action_command(update, context, 'compress_pdf', 'Please send the PDF you want to compress.')
+    await update.message.reply_text(
+        set_action_state(update, ActionState.WAITING_FOR_PDF_COMPRESS, 'Please send the PDF you want to compress.')
+    )
 
 
 async def to_pdf_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await file_action_command(update, context, 'to_pdf', 'Please send the image to convert to PDF.')
+    await update.message.reply_text(
+        set_action_state(update, ActionState.WAITING_FOR_IMAGE_TO_PDF, 'Please send the image to convert to PDF.')
+    )
 
 
 async def to_images_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await file_action_command(update, context, 'to_images', 'Please send the PDF to convert into images.')
-
-
-def get_user_history(user_id: int) -> list:
-    return user_histories.setdefault(user_id, [])
-
-
-def add_to_history(user_id: int, role: str, text: str):
-    history = get_user_history(user_id)
-    history.append({'role': role, 'parts': [text]})
-    if len(history) > MAX_HISTORY_LENGTH:
-        user_histories[user_id] = history[-MAX_HISTORY_LENGTH:]
+    await update.message.reply_text(
+        set_action_state(update, ActionState.WAITING_FOR_PDF_TO_IMAGES, 'Please send the PDF to convert into images.')
+    )
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.message.from_user.id
     text = update.message.text
-    add_to_history(user_id, "user", text)
+    sm = SessionManager()
 
+    if not sm.check_rate_limit(user_id):
+        await update.message.reply_text(
+            "Rate limit exceeded. You can make up to 5 AI requests per minute. Please wait."
+        )
+        return
+
+    sm.add_history(user_id, "user", text)
+    sm.record_request(user_id)
+
+    session = sm.get_session(user_id)
     try:
         response_text = generate_response(
             api_key=GEMINI_API_KEY,
             model_name=MODEL_NAME,
             prompt=text,
-            conversation_history=get_user_history(user_id)
+            conversation_history=session.history
         )
     except Exception as e:
         logger.error("Brain error for user %s: %s", user_id, e)
         response_text = "Sorry, I encountered an error. Please try again."
 
-    add_to_history(user_id, "model", response_text)
+    sm.add_history(user_id, "model", response_text)
     await update.message.reply_text(response_text)
 
 
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.message.from_user.id
-    action = user_actions.get(user_id)
-    if action:
-        await process_file_action(update, context, action)
+    sm = SessionManager()
+    session = sm.get_session(user_id)
+
+    if session.action_state != ActionState.NONE:
+        await process_file_action(update, context, session.action_state)
     else:
         await analyze_file_with_brain(update, context)
 
 
-async def process_file_action(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str):
+async def process_file_action(update: Update, context: ContextTypes.DEFAULT_TYPE, action_state: ActionState):
     user_id = update.message.from_user.id
+    sm = SessionManager()
 
-    action_requirements = {
-        'compress_image': {'type': 'photo', 'message': 'Please send an image file for this action.'},
-        'to_pdf': {'type': 'photo', 'message': 'Please send an image file for this action.'},
-        'compress_pdf': {'type': 'document', 'mime': 'application/pdf', 'message': 'Please send a PDF document.'},
-        'to_images': {'type': 'document', 'mime': 'application/pdf', 'message': 'Please send a PDF document.'},
+    mapping = {
+        ActionState.WAITING_FOR_IMAGE_COMPRESS: ('photo', 'application/pdf', 'Please send an image file.'),
+        ActionState.WAITING_FOR_PDF_COMPRESS: ('document', 'application/pdf', 'Please send a PDF document.'),
+        ActionState.WAITING_FOR_IMAGE_TO_PDF: ('photo', 'application/pdf', 'Please send an image file.'),
+        ActionState.WAITING_FOR_PDF_TO_IMAGES: ('document', 'application/pdf', 'Please send a PDF document.'),
     }
-    req = action_requirements[action]
+
+    expected_type, _, invalid_msg = mapping.get(action_state, (None, None, None))
+    if not expected_type:
+        return
 
     valid_file = False
     file_id = None
 
-    if req['type'] == 'photo' and update.message.photo:
+    if expected_type == 'photo' and update.message.photo:
         valid_file = True
         file_id = update.message.photo[-1].file_id
-    elif req['type'] == 'document' and update.message.document and update.message.document.mime_type == req['mime']:
-        valid_file = True
-        file_id = update.message.document.file_id
+    elif expected_type == 'document' and update.message.document:
+        if update.message.document.mime_type == 'application/pdf':
+            valid_file = True
+            file_id = update.message.document.file_id
 
     if not valid_file:
-        await update.message.reply_text(req['message'] + "\nOr type /cancel to stop.")
+        await update.message.reply_text(invalid_msg + "\nOr type /cancel to stop.")
         return
 
-    del user_actions[user_id]
-    await update.message.reply_text(f"File received. Starting '{action}'...")
+    sm.clear_action(user_id)
+    await update.message.reply_text(f"File received. Processing...")
 
     input_path = None
     output_path = None
@@ -203,32 +207,32 @@ async def process_file_action(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         input_path = await extract_file(context.bot, file_id)
         if not input_path:
-            raise ValueError("File could not be downloaded from Telegram.")
+            raise ValueError("File could not be downloaded.")
 
         action_funcs = {
-            'compress_image': compress_image,
-            'compress_pdf': compress_pdf,
-            'to_pdf': convert_image_to_pdf,
-            'to_images': convert_pdf_to_images
+            ActionState.WAITING_FOR_IMAGE_COMPRESS: compress_image,
+            ActionState.WAITING_FOR_PDF_COMPRESS: compress_pdf,
+            ActionState.WAITING_FOR_IMAGE_TO_PDF: convert_image_to_pdf,
+            ActionState.WAITING_FOR_PDF_TO_IMAGES: convert_pdf_to_images,
         }
-        output_path = action_funcs[action](input_path, OUTPUT_DIR)
+        output_path = action_funcs[action_state](input_path, OUTPUT_DIR)
 
         if output_path and os.path.exists(output_path):
             if os.path.isdir(output_path):
-                await update.message.reply_text("Action complete. Sending your files...")
+                await update.message.reply_text("Done. Sending your files...")
                 for filename in sorted(os.listdir(output_path)):
                     filepath = os.path.join(output_path, filename)
                     with open(filepath, 'rb') as f:
                         await context.bot.send_document(chat_id=user_id, document=f)
             else:
-                await update.message.reply_text("Action complete. Sending your file...")
+                await update.message.reply_text("Done. Sending your file...")
                 with open(output_path, 'rb') as f:
                     await context.bot.send_document(chat_id=user_id, document=f)
         else:
-            await update.message.reply_text("The action failed or no changes were made.")
+            await update.message.reply_text("Action failed or no changes were made.")
 
     except Exception as e:
-        logger.error("File action '%s' error for user %s: %s", action, user_id, e)
+        logger.error("File action error for user %s: %s", user_id, e)
         await update.message.reply_text(f"An error occurred: {e}")
 
     finally:
@@ -248,6 +252,15 @@ async def process_file_action(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def analyze_file_with_brain(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    sm = SessionManager()
+
+    if not sm.check_rate_limit(user_id):
+        await update.message.reply_text(
+            "Rate limit exceeded. You can make up to 5 AI requests per minute. Please wait."
+        )
+        return
+
     file_id = None
     if update.message.photo:
         file_id = update.message.photo[-1].file_id
@@ -255,24 +268,28 @@ async def analyze_file_with_brain(update: Update, context: ContextTypes.DEFAULT_
         file_id = update.message.document.file_id
 
     if not file_id:
-        return await update.message.reply_text("File type not suitable for analysis.")
+        await update.message.reply_text("Unsupported file type.")
+        return
 
-    await update.message.reply_text('File received, analyzing with AI...')
+    await update.message.reply_text('File received, analyzing...')
+    sm.record_request(user_id)
     file_path = None
 
     try:
         file_path = await extract_file(context.bot, file_id)
         if not file_path:
-            await update.message.reply_text("Failed to download file. Please try again.")
+            await update.message.reply_text("Failed to download file.")
             return
 
-        prompt = update.message.caption or "Describe this file in detail. If there are questions, solve them with detailed answers."
+        prompt = update.message.caption or "Describe this file. If there are questions, solve them with detailed answers."
+        session = sm.get_session(user_id)
+
         response_text = generate_response(
             api_key=GEMINI_API_KEY,
             model_name=MODEL_NAME,
             prompt=prompt,
             file_path=file_path,
-            conversation_history=get_user_history(update.message.from_user.id)
+            conversation_history=session.history
         )
 
         MAX_MSG_LEN = 4096
@@ -282,7 +299,7 @@ async def analyze_file_with_brain(update: Update, context: ContextTypes.DEFAULT_
         else:
             await update.message.reply_text(response_text)
 
-        add_to_history(update.message.from_user.id, "model", response_text)
+        sm.add_history(user_id, "model", response_text)
 
     except Exception as e:
         logger.error("Brain analysis error: %s", e)
@@ -296,8 +313,8 @@ async def analyze_file_with_brain(update: Update, context: ContextTypes.DEFAULT_
                 pass
 
 
-async def shutdown_signal_handler(app: Application, signal_received: int, loop: asyncio.AbstractEventLoop):
-    logger.info("Shutdown signal received (signal %d). Stopping bot...", signal_received)
+async def shutdown_signal_handler(app: Application, sig: int, loop: asyncio.AbstractEventLoop):
+    logger.info("Shutdown signal received (signal %d).", sig)
     shutdown_event.set()
     await app.stop()
 
@@ -316,7 +333,6 @@ def main() -> None:
     application.add_handler(MessageHandler((filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, handle_media))
 
     loop = asyncio.get_event_loop()
-
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown_signal_handler(application, s, loop)))
 
