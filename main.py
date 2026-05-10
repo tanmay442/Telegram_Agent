@@ -36,6 +36,11 @@ shutdown_event = asyncio.Event()
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    sm = SessionManager()
+    user_id = update.message.from_user.id
+
+    ai_quota = sm.get_ai_quota(user_id)
+
     welcome_text = (
         "Hi! I'm ready to assist you.\n\n"
         "You can send me a photo of a question and I can provide solutions.\n\n"
@@ -45,7 +50,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/compress_pdf - Compress a PDF\n"
         "/to_pdf - Convert image to PDF\n"
         "/to_images - Convert PDF to images\n"
-        "/cancel - Cancel current operation"
+        "/cancel - Cancel current operation\n\n"
+        f"_{ai_quota}_"
     )
     await update.message.reply_text(welcome_text, parse_mode=ParseMode.MARKDOWN_V2)
 
@@ -63,8 +69,17 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def hbtu_updates_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.message.from_user.id
+    sm = SessionManager()
+
+    allowed, message = sm.check_ai_rate_limit(user_id)
+    if not allowed:
+        await update.message.reply_text(message)
+        return
+
     await update.message.reply_text("Checking for the latest HBTU updates, this may take a moment...")
     logger.info("User %s initiated HBTU update check.", user_id)
+
+    sm.record_ai_request(user_id)
 
     try:
         new_updates = await asyncio.to_thread(check_for_updates)
@@ -132,14 +147,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     text = update.message.text
     sm = SessionManager()
 
-    if not sm.check_rate_limit(user_id):
-        await update.message.reply_text(
-            "Rate limit exceeded. You can make up to 5 AI requests per minute. Please wait."
-        )
+    allowed, message = sm.check_ai_rate_limit(user_id)
+    if not allowed:
+        await update.message.reply_text(message)
         return
 
+    if message:
+        await update.message.reply_text(message)
+
     sm.add_history(user_id, "user", text)
-    sm.record_request(user_id)
+    sm.record_ai_request(user_id)
 
     session = sm.get_session(user_id)
     try:
@@ -154,7 +171,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         response_text = "Sorry, I encountered an error. Please try again."
 
     sm.add_history(user_id, "model", response_text)
-    await update.message.reply_text(response_text)
+
+    quota_msg = sm.get_ai_quota(user_id)
+    final_response = f"{response_text}\n\n_{quota_msg}_"
+
+    await update.message.reply_text(final_response, parse_mode=ParseMode.MARKDOWN_V2)
 
 
 async def handle_media(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -173,13 +194,13 @@ async def process_file_action(update: Update, context: ContextTypes.DEFAULT_TYPE
     sm = SessionManager()
 
     mapping = {
-        ActionState.WAITING_FOR_IMAGE_COMPRESS: ('photo', 'application/pdf', 'Please send an image file.'),
-        ActionState.WAITING_FOR_PDF_COMPRESS: ('document', 'application/pdf', 'Please send a PDF document.'),
-        ActionState.WAITING_FOR_IMAGE_TO_PDF: ('photo', 'application/pdf', 'Please send an image file.'),
-        ActionState.WAITING_FOR_PDF_TO_IMAGES: ('document', 'application/pdf', 'Please send a PDF document.'),
+        ActionState.WAITING_FOR_IMAGE_COMPRESS: ('photo', 'Please send an image file.'),
+        ActionState.WAITING_FOR_PDF_COMPRESS: ('document', 'Please send a PDF document.'),
+        ActionState.WAITING_FOR_IMAGE_TO_PDF: ('photo', 'Please send an image file.'),
+        ActionState.WAITING_FOR_PDF_TO_IMAGES: ('document', 'Please send a PDF document.'),
     }
 
-    expected_type, _, invalid_msg = mapping.get(action_state, (None, None, None))
+    expected_type, invalid_msg = mapping.get(action_state, (None, None))
     if not expected_type:
         return
 
@@ -198,6 +219,12 @@ async def process_file_action(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(invalid_msg + "\nOr type /cancel to stop.")
         return
 
+    allowed, file_op_msg = sm.check_file_op_rate_limit(user_id)
+    if not allowed:
+        await update.message.reply_text(file_op_msg)
+        return
+
+    sm.record_file_op(user_id)
     sm.clear_action(user_id)
     await update.message.reply_text(f"File received. Processing...")
 
@@ -255,11 +282,13 @@ async def analyze_file_with_brain(update: Update, context: ContextTypes.DEFAULT_
     user_id = update.message.from_user.id
     sm = SessionManager()
 
-    if not sm.check_rate_limit(user_id):
-        await update.message.reply_text(
-            "Rate limit exceeded. You can make up to 5 AI requests per minute. Please wait."
-        )
+    allowed, message = sm.check_ai_rate_limit(user_id)
+    if not allowed:
+        await update.message.reply_text(message)
         return
+
+    if message:
+        await update.message.reply_text(message)
 
     file_id = None
     if update.message.photo:
@@ -272,7 +301,7 @@ async def analyze_file_with_brain(update: Update, context: ContextTypes.DEFAULT_
         return
 
     await update.message.reply_text('File received, analyzing...')
-    sm.record_request(user_id)
+    sm.record_ai_request(user_id)
     file_path = None
 
     try:
@@ -297,7 +326,9 @@ async def analyze_file_with_brain(update: Update, context: ContextTypes.DEFAULT_
             for i in range(0, len(response_text), MAX_MSG_LEN):
                 await update.message.reply_text(response_text[i:i+MAX_MSG_LEN])
         else:
-            await update.message.reply_text(response_text)
+            quota_msg = sm.get_ai_quota(user_id)
+            full_response = f"{response_text}\n\n_{quota_msg}_"
+            await update.message.reply_text(full_response, parse_mode=ParseMode.MARKDOWN_V2)
 
         sm.add_history(user_id, "model", response_text)
 
