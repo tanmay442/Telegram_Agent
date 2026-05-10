@@ -34,6 +34,33 @@ logger = logging.getLogger(__name__)
 
 shutdown_event = asyncio.Event()
 
+HELP_TEXT = """
+*Available Commands:*
+
+*AI Chat*
+Send any message and I'll respond with AI assistance.
+
+*File Operations*
+`/compress_image` `/ci` - Compress an image
+`/compress_pdf` `/cpdf` - Compress a PDF
+`/to_pdf` `/tp` - Convert image to PDF
+`/to_images` `/ti` - Convert PDF to images
+
+*Utility*
+`/hbtu_updates` `/hu` - Check HBTU circulars
+`/cancel` - Cancel current operation
+`/help` - Show this help message
+
+*Rate Limits*
+AI: 5 requests per minute (warning at 3)
+File ops: 100 per hour
+
+*Examples*
+• Send a photo with caption "solve this"
+• Type a math problem for step-by-step solution
+• Use `/ci` then send an image to compress
+"""
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     sm = SessionManager()
@@ -50,10 +77,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/compress_pdf - Compress a PDF\n"
         "/to_pdf - Convert image to PDF\n"
         "/to_images - Convert PDF to images\n"
-        "/cancel - Cancel current operation\n\n"
+        "/cancel - Cancel current operation\n"
+        "/help - Full command list\n\n"
         f"_{ai_quota}_"
     )
     await update.message.reply_text(welcome_text, parse_mode=ParseMode.MARKDOWN_V2)
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    sm = SessionManager()
+    user_id = update.message.from_user.id
+    ai_quota = sm.get_ai_quota(user_id)
+    await update.message.reply_text(
+        f"{HELP_TEXT}\n_{ai_quota}_",
+        parse_mode=ParseMode.MARKDOWN_V2
+    )
 
 
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -354,12 +392,18 @@ def main() -> None:
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(CommandHandler("hbtu_updates", hbtu_updates_command))
+    application.add_handler(CommandHandler(["hbtu_updates", "hu"], hbtu_updates_command))
     application.add_handler(CommandHandler("compress_image", compress_image_command))
+    application.add_handler(CommandHandler(["compress_image", "ci"], compress_image_command))
     application.add_handler(CommandHandler("compress_pdf", compress_pdf_command))
+    application.add_handler(CommandHandler(["compress_pdf", "cpdf"], compress_pdf_command))
     application.add_handler(CommandHandler("to_pdf", to_pdf_command))
+    application.add_handler(CommandHandler(["to_pdf", "tp"], to_pdf_command))
     application.add_handler(CommandHandler("to_images", to_images_command))
+    application.add_handler(CommandHandler(["to_images", "ti"], to_images_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(MessageHandler((filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, handle_media))
 
