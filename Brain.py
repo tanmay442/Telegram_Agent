@@ -1,4 +1,5 @@
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 import logging
 import time
 from typing import Optional, Any
@@ -22,37 +23,45 @@ def generate_response(
 
     for attempt in range(max_retries):
         try:
-            genai.configure(api_key=api_key)
+            client = genai.Client(api_key=api_key)
 
-            model = genai.GenerativeModel(
-                model_name,
+            config = types.GenerateContentConfig(
                 system_instruction=system_instruction
             )
 
-            chat_history = conversation_history or []
+            # Map old chat history format to the new API if needed
+            # For simplicity, assuming the history follows the new structure (role, parts)
+            # or converting it here.
+            contents = []
+            if conversation_history:
+                for entry in conversation_history:
+                    contents.append(types.Content(role=entry['role'], parts=[types.Part.from_text(text=p) if isinstance(p, str) else p for p in entry['parts']]))
 
-            user_prompt_parts: list[Any] = []
-            uploaded_file: Optional[Any] = None
-
+            user_parts = []
             if file_path:
                 try:
-                    uploaded_file = genai.upload_file(path=file_path)
-                    user_prompt_parts.append(uploaded_file)
+                    # Upload file using the new API
+                    with open(file_path, "rb") as f:
+                        file_data = f.read()
+                        # For simple images/PDFs, we can send them directly or upload.
+                        # The new SDK supports direct upload or using the files service.
+                        # Here we'll use a simple approach for the common case.
+                        # Note: In production, you might want to handle mime_type specifically.
+                        import mimetypes
+                        mime_type, _ = mimetypes.guess_type(file_path)
+                        user_parts.append(types.Part.from_bytes(data=file_data, mime_type=mime_type or "application/octet-stream"))
                 except Exception as e:
-                    logger.error("Failed to upload file %s: %s", file_path, e)
-                    return f"Failed to upload file: {e}"
+                    logger.error("Failed to read file %s: %s", file_path, e)
+                    return f"Failed to read file: {e}"
 
-            user_prompt_parts.append(prompt)
+            user_parts.append(types.Part.from_text(text=prompt))
+            contents.append(types.Content(role="user", parts=user_parts))
 
-            content_to_send = chat_history + [{'role': 'user', 'parts': user_prompt_parts}]
-
-            response = model.generate_content(content_to_send)
-
-            if uploaded_file:
-                try:
-                    genai.delete_file(uploaded_file.name)
-                except Exception as e:
-                    logger.warning("Failed to delete uploaded file: %s", e)
+            response = client.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=config
+            )
 
             return response.text
 
@@ -66,4 +75,4 @@ def generate_response(
                 time.sleep(delay)
 
     logger.error("All %d retry attempts failed. Last error: %s", max_retries, last_error)
-    return f"AI service temporarily unavailable. Please try again later."
+    return "AI service temporarily unavailable\\. Please try again later\\."

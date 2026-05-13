@@ -6,8 +6,10 @@ import signal
 import dotenv
 import traceback
 from telegram import Update
+from telegram.error import BadRequest
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from telegram.constants import ParseMode
+from telegram.helpers import escape_markdown
 
 from FileActions.img_compress import compress_image
 from FileActions.pdf_compress import compress_pdf
@@ -21,7 +23,7 @@ dotenv.load_dotenv()
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-MODEL_NAME = os.environ.get("MODEL_NAME")
+MODEL_NAME = os.environ.get("MODEL_NAME", "gemini-2.5-flash")
 
 OUTPUT_DIR = "Temp/Output"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -141,7 +143,12 @@ async def hbtu_updates_command(update: Update, context: ContextTypes.DEFAULT_TYP
             prompt=prompt,
             system_instruction=system_prompt
         )
-        await update.message.reply_text(formatted_response, parse_mode=ParseMode.MARKDOWN_V2)
+        try:
+            await update.message.reply_text(formatted_response, parse_mode=ParseMode.MARKDOWN_V2)
+        except BadRequest as exc:
+            logger.warning("MarkdownV2 send failed, falling back to escaped text: %s", exc)
+            safe_text = escape_markdown(formatted_response, version=2)
+            await update.message.reply_text(safe_text, parse_mode=ParseMode.MARKDOWN_V2)
 
     except Exception:
         error_details = traceback.format_exc()
@@ -407,12 +414,13 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     application.add_handler(MessageHandler((filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND, handle_media))
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown_signal_handler(application, s, loop)))
 
     logger.info("Bot is starting...")
-    application.run_polling(stop_event=shutdown_event)
+    application.run_polling()
 
 
 if __name__ == '__main__':
