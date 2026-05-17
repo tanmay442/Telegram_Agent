@@ -3,11 +3,13 @@ import os
 import io
 import datetime
 import logging
+from PIL import ImageOps
 
 logger = logging.getLogger(__name__)
 
 
 def compress_image(input_path: str, output_dir: str, max_size: int = 500, quality: int = 85) -> str | None:
+    os.makedirs(output_dir, exist_ok=True)
     file_name = f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_compressed.jpg"
     output_path = os.path.join(output_dir, file_name)
     max_size_bytes = max_size * 1024
@@ -18,7 +20,8 @@ def compress_image(input_path: str, output_dir: str, max_size: int = 500, qualit
             logger.info("Image already under %d KB, returning original.", max_size)
             return input_path
 
-        with Image.open(input_path) as img:
+        with Image.open(input_path) as original_img:
+            img = ImageOps.exif_transpose(original_img)
             if img.mode in ('RGBA', 'P'):
                 img = img.convert('RGB')
 

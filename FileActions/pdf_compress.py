@@ -49,7 +49,7 @@ def _compress_pdf_images(input_path: str, output_dir: str, quality: int = 75) ->
                 pil_image.save(img_buffer, format="JPEG", quality=quality, optimize=True)
                 img_buffer.seek(0)
 
-                page.replace_image(xref, stream=img_buffer)
+                page.replace_image(xref, stream=img_buffer.getvalue())
                 image_found = True
 
         if not image_found:

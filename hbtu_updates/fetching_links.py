@@ -1,82 +1,66 @@
-import os
+import logging
+from urllib.parse import urljoin
+
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin
-import logging
 
 logger = logging.getLogger(__name__)
 
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    )
+}
 
-def scrape_top_links(url: str, content_selector: str, limit: int = 2) -> list[dict]:
-    scraped_data = []
 
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
+def _clean_text(raw_text: str) -> str:
+    return " ".join(raw_text.split()).strip()
 
+
+def scrape_top_links(
+    url: str,
+    content_selector: str,
+    limit: int = 2,
+    fallback_selectors: list[str] | None = None,
+) -> list[dict]:
     try:
-        response = requests.get(url, headers=headers, timeout=15)
+        response = requests.get(url, headers=HEADERS, timeout=20)
         response.raise_for_status()
+    except requests.RequestException as exc:
+        logger.error("Failed to fetch URL %s: %s", url, exc)
+        return []
 
-        soup = BeautifulSoup(response.content, 'html.parser')
+    soup = BeautifulSoup(response.content, "html.parser")
+    selectors = [content_selector] + (fallback_selectors or [])
 
-        content_area = soup.select_one(content_selector)
+    content_area = None
+    for selector in selectors:
+        content_area = soup.select_one(selector)
+        if content_area:
+            break
 
-        if not content_area:
-            logger.warning(f"Could not find content area with selector '{content_selector}' on {url}")
-            return []
+    if not content_area:
+        logger.warning("Selector lookup failed for %s, scanning full page", url)
+        content_area = soup
 
-        links = content_area.find_all('a', limit=limit)
+    seen_links: set[str] = set()
+    scraped_data: list[dict] = []
+    for link_tag in content_area.select("a[href]"):
+        href = (link_tag.get("href") or "").strip()
+        text = _clean_text(link_tag.get_text(" ", strip=True))
+        if not href or not text:
+            continue
+        if href.startswith("#") or href.lower().startswith("javascript:"):
+            continue
 
-        for link_tag in links:
-            text = link_tag.get_text(strip=True)
-            href = link_tag.get('href')
+        full_link = urljoin(url, href)
+        if full_link in seen_links:
+            continue
+        seen_links.add(full_link)
+        scraped_data.append({"text": text, "link": full_link})
 
-            if text and href:
-                full_link = urljoin(url, href)
-                scraped_data.append({
-                    'text': text,
-                    'link': full_link
-                })
-
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Failed to fetch URL {url}: {e}")
+        if len(scraped_data) >= limit:
+            break
 
     return scraped_data
-
-
-def write_links_to_file() -> None:
-    output_filename = 'hbtu_updates/hbtu_links.txt'
-
-    pages_to_scrape = {
-        "Conference & Events": {
-            "url": "https://hbtu.ac.in/conference-events/",
-            "selector": ".entry-content"
-        },
-        "Academic Circulars": {
-            "url": "https://hbtu.ac.in/academic-circular/",
-            "selector": ".entry-content"
-        },
-        "Examination Circulars": {
-            "url": "https://hbtu.ac.in/examinations/",
-            "selector": "#e-n-tab-content-9783400146"
-        }
-    }
-
-    with open(output_filename, 'w', encoding='utf-8') as f:
-        logger.info("Scraping links and saving to file...")
-
-        for page_title, page_info in pages_to_scrape.items():
-            data = scrape_top_links(
-                url=page_info["url"],
-                content_selector=page_info["selector"],
-                limit=5
-            )
-
-            if data:
-                for item in data:
-                    f.write(f"('{item['text']}', '{item['link']}')\n")
-            else:
-                f.write("No links were found on this page.\n\n")
-
-    logger.info("Links saved to '%s'.", output_filename)
