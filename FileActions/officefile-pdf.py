@@ -1,55 +1,40 @@
-import docx2pdf
 import os
 import datetime
-import fitz  # PyMuPDF
-from PIL import Image
-#import comtypes.client
 
-def convert_docx_to_pdf(input_path, output_path):
-    output_path=os.path.join(output_path,f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_converted.pdf")
+try:
+    import docx2pdf
+except ImportError:  # pragma: no cover - optional dependency
+    docx2pdf = None
+
+
+def _build_output_path(output_dir: str) -> str:
+    os.makedirs(output_dir, exist_ok=True)
+    filename = f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_converted.pdf"
+    return os.path.join(output_dir, filename)
+
+
+def convert_docx_to_pdf(input_path: str, output_dir: str) -> str:
+    if docx2pdf is None:
+        raise RuntimeError("docx2pdf is not installed. Install it to convert DOCX files.")
+    output_path = _build_output_path(output_dir)
     docx2pdf.convert(input_path, output_path)
     return output_path
 
-def convert_pptx_to_pdf(input_path, output_path):
-    output_path=os.path.join(output_path,f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_converted.pdf")
-    powerpoint = comtypes.client.CreateObject("Powerpoint.Application")
-    powerpoint.Visible = 1
-    slides = powerpoint.Presentations.Open(input_path)
-    slides.SaveAs(output_path, 32)  # formatType = 32 for ppt to pdf
-    slides.Close()
-    powerpoint.Quit()
-    return output_path
 
-def convert_xlsx_to_pdf(input_path, output_path):
-    output_path=os.path.join(output_path,f"{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_converted.pdf")
-    excel = comtypes.client.CreateObject("Excel.Application")
-    excel.Visible = 1
-    sheets = excel.Workbooks.Open(input_path)
-    sheets.ExportAsFixedFormat(0, output_path)  # formatType = 0 for xlsx to pdf
-    sheets.Close()
-    excel.Quit()
-    return output_path
+def convert_pptx_to_pdf(input_path: str, output_dir: str) -> str:
+    raise NotImplementedError("PPTX to PDF conversion is not supported in this Linux build.")
 
-def office_to_pdf(input_path, output_path):
-    
+
+def convert_xlsx_to_pdf(input_path: str, output_dir: str) -> str:
+    raise NotImplementedError("XLSX to PDF conversion is not supported in this Linux build.")
+
+
+def office_to_pdf(input_path: str, output_dir: str) -> str:
     ext = os.path.splitext(input_path)[1].lower()
-
-    if ext == '.docx' :
-        return convert_docx_to_pdf(input_path, output_path)
-    
-    elif ext == '.pptx':
-        pass
-        return convert_pptx_to_pdf(input_path, output_path)
-    
-    elif ext == '.xlsx':
-        pass
-        return convert_xlsx_to_pdf(input_path, output_path)
-    
-    else:
-        raise ValueError("Unsupported file format")
-
-##Testing Purposes   
-##office_to_pdf("un.docx","Temp/temp_pdfs/cache")
-
-
-##apparantely this onyl works in windows so i need to figure out something else that works everywehere
+    if ext == ".docx":
+        return convert_docx_to_pdf(input_path, output_dir)
+    if ext == ".pptx":
+        return convert_pptx_to_pdf(input_path, output_dir)
+    if ext == ".xlsx":
+        return convert_xlsx_to_pdf(input_path, output_dir)
+    raise ValueError("Unsupported file format")

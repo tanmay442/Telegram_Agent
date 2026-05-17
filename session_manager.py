@@ -93,7 +93,11 @@ class UserSession:
         self.file_op_timestamps = self._clean_old_timestamps(self.file_op_timestamps, FILE_OP_WINDOW_SECONDS)
 
         if len(self.file_op_timestamps) >= FILE_OP_MAX_REQUESTS:
-            remaining_time = AI_WINDOW_SECONDS - (time.time() - self.file_op_timestamps[0]) if self.file_op_timestamps else AI_WINDOW_SECONDS
+            remaining_time = (
+                FILE_OP_WINDOW_SECONDS - (time.time() - self.file_op_timestamps[0])
+                if self.file_op_timestamps
+                else FILE_OP_WINDOW_SECONDS
+            )
             minutes = int(remaining_time // 60)
             return False, f"File operation rate limit exceeded. Try again in {minutes} minutes."
 

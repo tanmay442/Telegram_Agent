@@ -1,13 +1,8 @@
 python-telegram-bot>=20.0
 python-dotenv
-google-api-python-client
-google-auth
-google-auth-oauthlib
-google-auth-httplib2
 pypdf
 Pillow
 requests
 PyMuPDF
 beautifulsoup4
-google-generativeai
 img2pdf
